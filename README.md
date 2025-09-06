@@ -2,6 +2,8 @@
 
 A NeoForge 1.21.1 Minecraft mod that integrates with Cobblemon to provide enhanced Pokédex tracking and statistics through a Go backend API with PostgreSQL database.
 
+Designed for use with the backend and database build at https://github.com/DiamonDoughnut/pokefactory-server.
+
 ## Current Features
 
 ### Core Functionality
