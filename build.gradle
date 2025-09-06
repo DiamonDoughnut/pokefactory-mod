@@ -119,9 +119,9 @@ dependencies {
     // KotlinForForge dependency
     implementation 'thedarkcolour:kotlinforforge-neoforge:5.5.0'
     
-    // Cobblemon dependency - optional for development
-    compileOnly "com.cobblemon:neoforge:${cobblemon_version}"
-    // Use localRuntime so it's available at runtime but not required for compilation
+    // Cobblemon dependency - available for compilation and runtime
+    implementation "com.cobblemon:neoforge:${cobblemon_version}"
+    // Also add to localRuntime for development
     localRuntime "com.cobblemon:neoforge:${cobblemon_version}"
 
     // Example optional mod dependency with JEI

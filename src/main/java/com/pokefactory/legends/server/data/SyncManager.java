@@ -175,45 +175,83 @@ public class SyncManager {
     }
     
     private void applyCobblemonPokedexEntry(UUID playerUuid, int nationalDexNumber) {
-        // This would integrate with Cobblemon's pokedex system
-        // For now, just log the action
-        PokeFactoryLegends.LOGGER.info("Would apply pokedex entry #{} for player {}", 
-            nationalDexNumber, playerUuid);
-        
-        /*
-         * Actual Cobblemon integration would look like:
-         * 
-         * ServerPlayer player = getPlayerByUuid(playerUuid);
-         * if (player != null) {
-         *     CobblemonPokedex pokedex = Cobblemon.playerData.get(player).getPokedex();
-         *     Species species = PokemonSpecies.getByNationalPokedexNumber(nationalDexNumber);
-         *     pokedex.setHasCaught(species, true);
-         * }
-         */
+        try {
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            if (server == null) return;
+            
+            ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+            if (player == null) return;
+            
+            // Use reflection to access Cobblemon's pokedex system
+            Class<?> cobblemonClass = Class.forName("com.cobblemon.mod.common.Cobblemon");
+            Object cobblemonInstance = cobblemonClass.getField("INSTANCE").get(null);
+            
+            // Get player data
+            Object storage = cobblemonClass.getMethod("getStorage").invoke(cobblemonInstance);
+            Object playerData = storage.getClass().getMethod("getParty", java.util.UUID.class).invoke(storage, playerUuid);
+            
+            // Get pokedex from player data
+            Object pokedex = playerData.getClass().getMethod("getPokedex").invoke(playerData);
+            
+            // Get species by national dex number
+            Class<?> speciesClass = Class.forName("com.cobblemon.mod.common.pokemon.Species");
+            Object species = speciesClass.getMethod("getByNationalPokedexNumber", int.class).invoke(null, nationalDexNumber);
+            
+            if (species != null) {
+                // Set as caught in pokedex
+                pokedex.getClass().getMethod("setHasCaught", speciesClass, boolean.class).invoke(pokedex, species, true);
+                PokeFactoryLegends.LOGGER.info("Applied pokedex entry #{} for player {}", nationalDexNumber, playerUuid);
+            }
+            
+        } catch (Exception e) {
+            PokeFactoryLegends.LOGGER.warn("Could not apply pokedex entry #{} for player {}: {}", 
+                nationalDexNumber, playerUuid, e.getMessage());
+        }
     }
     
     private JsonArray getCobblemonPokedexData(UUID playerUuid) {
         JsonArray pokedexData = new JsonArray();
         
-        // This would integrate with Cobblemon's pokedex system
-        // For now, return empty array
-        
-        /*
-         * Actual Cobblemon integration would look like:
-         * 
-         * ServerPlayer player = getPlayerByUuid(playerUuid);
-         * if (player != null) {
-         *     CobblemonPokedex pokedex = Cobblemon.playerData.get(player).getPokedex();
-         *     for (Species species : PokemonSpecies.getAllSpecies()) {
-         *         if (pokedex.hasCaught(species)) {
-         *             JsonObject entry = new JsonObject();
-         *             entry.addProperty("national_dex_number", species.getNationalPokedexNumber());
-         *             entry.addProperty("caught", true);
-         *             pokedexData.add(entry);
-         *         }
-         *     }
-         * }
-         */
+        try {
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            if (server == null) return pokedexData;
+            
+            ServerPlayer player = server.getPlayerList().getPlayer(playerUuid);
+            if (player == null) return pokedexData;
+            
+            // Use reflection to access Cobblemon's pokedex system
+            Class<?> cobblemonClass = Class.forName("com.cobblemon.mod.common.Cobblemon");
+            Object cobblemonInstance = cobblemonClass.getField("INSTANCE").get(null);
+            
+            // Get player data
+            Object storage = cobblemonClass.getMethod("getStorage").invoke(cobblemonInstance);
+            Object playerData = storage.getClass().getMethod("getParty", java.util.UUID.class).invoke(storage, playerUuid);
+            
+            // Get pokedex from player data
+            Object pokedex = playerData.getClass().getMethod("getPokedex").invoke(playerData);
+            
+            // Get all species and check which are caught
+            Class<?> speciesClass = Class.forName("com.cobblemon.mod.common.pokemon.Species");
+            Object allSpecies = speciesClass.getMethod("getAllSpecies").invoke(null);
+            
+            if (allSpecies instanceof Iterable) {
+                for (Object species : (Iterable<?>) allSpecies) {
+                    boolean hasCaught = (Boolean) pokedex.getClass().getMethod("hasCaught", speciesClass).invoke(pokedex, species);
+                    
+                    if (hasCaught) {
+                        int nationalDexNumber = (Integer) species.getClass().getMethod("getNationalPokedexNumber").invoke(species);
+                        
+                        JsonObject entry = new JsonObject();
+                        entry.addProperty("national_dex_number", nationalDexNumber);
+                        entry.addProperty("caught", true);
+                        pokedexData.add(entry);
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            PokeFactoryLegends.LOGGER.warn("Could not retrieve pokedex data for player {}: {}", playerUuid, e.getMessage());
+        }
         
         return pokedexData;
     }

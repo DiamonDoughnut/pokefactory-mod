@@ -2,6 +2,7 @@ package com.pokefactory.legends;
 
 import com.pokefactory.legends.api.ApiClient;
 import com.pokefactory.legends.config.ModConfig;
+import com.pokefactory.legends.events.CobblemonEventHandler;
 import com.pokefactory.legends.server.data.ServerDataManager;
 import com.pokefactory.legends.util.DevEnvironment;
 import net.neoforged.bus.api.IEventBus;
@@ -35,6 +36,11 @@ public class PokeFactoryLegends {
         LOGGER.info("PokéFactory Legends initializing...");
         apiClient = new ApiClient();
         LOGGER.info("API client initialized");
+        
+        // Register Cobblemon events if available
+        event.enqueueWork(() -> {
+            CobblemonEventHandler.registerCobblemonEvents();
+        });
     }
     
     private void onServerStarted(final ServerStartedEvent event) {

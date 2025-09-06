@@ -70,7 +70,12 @@ public class ApiTestCommand {
                             int dexNumber = IntegerArgumentType.getInteger(context, "dexNumber");
                             simulateCapture(context.getSource(), dexNumber);
                             return 1;
-                        }))))
+                        })))
+                .then(Commands.literal("cobblemon")
+                    .executes(context -> {
+                        testCobblemonIntegration(context.getSource());
+                        return 1;
+                    })))
             .then(Commands.literal("dev")
                 .then(Commands.literal("info")
                     .executes(context -> {
@@ -196,5 +201,23 @@ public class ApiTestCommand {
         source.sendSuccess(() -> Component.literal("Development Environment Info:"), false);
         source.sendSuccess(() -> Component.literal(DevEnvironment.getDevInfo()), false);
         source.sendSuccess(() -> Component.literal("Use config to enable dev_mode and simulate_multiplayer"), false);
+    }
+    
+    private static void testCobblemonIntegration(CommandSourceStack source) {
+        source.sendSuccess(() -> Component.literal("Testing Cobblemon integration..."), false);
+        
+        try {
+            // Test if Cobblemon classes are available
+            Class.forName("com.cobblemon.mod.common.api.events.CobblemonEvents");
+            Class.forName("com.cobblemon.mod.common.pokemon.Species");
+            
+            source.sendSuccess(() -> Component.literal("✓ Cobblemon classes found"), false);
+            source.sendSuccess(() -> Component.literal("✓ Event integration should be active"), false);
+            source.sendSuccess(() -> Component.literal("Catch a Pokemon to test the integration!"), false);
+            
+        } catch (ClassNotFoundException e) {
+            source.sendFailure(Component.literal("✗ Cobblemon not found: " + e.getMessage()));
+            source.sendSuccess(() -> Component.literal("Use /pftest server simulate <dex> to test without Cobblemon"), false);
+        }
     }
 }

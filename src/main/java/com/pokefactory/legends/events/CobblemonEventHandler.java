@@ -10,10 +10,17 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
 @EventBusSubscriber(modid = PokeFactoryLegends.MOD_ID)
 public class CobblemonEventHandler {
+    private static boolean cobblemonEventsRegistered = false;
 
     @SubscribeEvent
     public static void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            // Register Cobblemon events on first player join
+            if (!cobblemonEventsRegistered) {
+                registerCobblemonEvents();
+                cobblemonEventsRegistered = true;
+            }
+            
             // Only register players if we're running server logic
             if (DevEnvironment.shouldRunServerLogic(player.level())) {
                 PokeFactoryLegends.getApiClient().createPlayer(
@@ -26,94 +33,91 @@ public class CobblemonEventHandler {
                         PokeFactoryLegends.LOGGER.warn("Failed to register player {} with backend", player.getName().getString());
                     }
                 });
-            } else {
-                PokeFactoryLegends.LOGGER.info("Skipping player registration in dev/single-player mode");
             }
         }
     }
 
-    // Cobblemon Events - These will be available when Cobblemon is properly loaded
-    // Based on Cobblemon API documentation and common patterns:
-    
-    /*
-     * Primary Pokemon Capture Event
-     * Available data from PokemonCapturedEvent:
-     * - getPlayer() -> ServerPlayer (the player who caught the Pokemon)
-     * - getPokemon() -> Pokemon (the caught Pokemon instance)
-     * 
-     * From Pokemon object you can access:
-     * - getSpecies() -> Species (Pokemon species data)
-     * - getSpecies().getNationalPokedexNumber() -> int (National Dex #)
-     * - getSpecies().getName() -> String (Pokemon name)
-     * - getLevel() -> int (Pokemon level)
-     * - getShiny() -> boolean (is shiny)
-     * - getNature() -> Nature (Pokemon nature)
-     * - getAbility() -> Ability (Pokemon ability)
-     * - getIVs() -> IVs (Individual Values)
-     * - getEVs() -> EVs (Effort Values)
-     * - getForm() -> FormData (Pokemon form/variant)
-     * - getGender() -> Gender (Pokemon gender)
-     * - getBall() -> PokeBall (ball used to catch)
-     * - getOriginalTrainer() -> String (OT name)
-     * - getOriginalTrainerUUID() -> UUID (OT UUID)
-     * - getCaughtBall() -> PokeBall (ball it was caught in)
-     * - getTeraType() -> ElementalType (Tera type if applicable)
-     */
-    
-    // This method will be registered when Cobblemon is available
     public static void registerCobblemonEvents() {
         try {
-            // Using reflection to avoid compile-time dependency issues
-            Class<?> cobblemonEventsClass = Class.forName("com.cobblemon.mod.common.api.events.CobblemonEvents");
-            Class<?> pokemonCapturedEventClass = Class.forName("com.cobblemon.mod.common.api.events.pokemon.PokemonCapturedEvent");
+            // Use reflection to safely register Cobblemon events
+            Class<?> eventsClass = Class.forName("com.cobblemon.mod.common.api.events.CobblemonEvents");
+            Class<?> captureEventClass = Class.forName("com.cobblemon.mod.common.api.events.pokemon.PokemonCapturedEvent");
             
-            // This would be the actual event registration when Cobblemon is available:
-            /*
-            CobblemonEvents.POKEMON_CAPTURED.subscribe(event -> {
-                PokemonCapturedEvent captureEvent = (PokemonCapturedEvent) event;
-                ServerPlayer player = captureEvent.getPlayer();
-                Pokemon pokemon = captureEvent.getPokemon();
-                
-                // Extract essential data
-                int nationalDexNumber = pokemon.getSpecies().getNationalPokedexNumber();
-                String pokemonName = pokemon.getSpecies().getName();
-                boolean isShiny = pokemon.getShiny();
-                
-                // Record capture in server data manager (handles deduplication)
-                ServerDataManager.getInstance().recordCapture(
-                    player.getUUID(),
-                    nationalDexNumber
-                );
-                
-                PokeFactoryLegends.LOGGER.info("Player {} caught #{} {} {}", 
-                    player.getName().getString(), 
-                    nationalDexNumber, 
-                    pokemonName,
-                    isShiny ? "(Shiny)" : "");
+            // Get the POKEMON_CAPTURED event field
+            Object pokemonCapturedEvent = eventsClass.getField("POKEMON_CAPTURED").get(null);
+            
+            // Create event handler using reflection
+            java.lang.reflect.Method subscribeMethod = pokemonCapturedEvent.getClass().getMethod("subscribe", 
+                Class.forName("com.cobblemon.mod.common.api.Priority"), 
+                java.util.function.Function.class);
+            
+            // Get Priority.NORMAL
+            Class<?> priorityClass = Class.forName("com.cobblemon.mod.common.api.Priority");
+            Object normalPriority = priorityClass.getField("NORMAL").get(null);
+            
+            // Subscribe to the event
+            subscribeMethod.invoke(pokemonCapturedEvent, normalPriority, (java.util.function.Function<Object, Object>) event -> {
+                handlePokemonCapture(event);
+                // Return Unit.INSTANCE for Kotlin compatibility
+                try {
+                    return Class.forName("kotlin.Unit").getField("INSTANCE").get(null);
+                } catch (Exception e) {
+                    return null;
+                }
             });
-            */
             
-            PokeFactoryLegends.LOGGER.info("Cobblemon events would be registered here when available");
+            PokeFactoryLegends.LOGGER.info("Successfully registered Cobblemon events");
             
-        } catch (ClassNotFoundException e) {
-            PokeFactoryLegends.LOGGER.warn("Cobblemon not available, skipping event registration");
+        } catch (Exception e) {
+            PokeFactoryLegends.LOGGER.warn("Cobblemon not available, events not registered: {}", e.getMessage());
         }
     }
     
-    /*
-     * Other potentially useful Cobblemon events:
-     * 
-     * - PokemonReleasedEvent: When a Pokemon is released
-     * - PokemonEvolvedEvent: When a Pokemon evolves
-     * - PokemonFaintedEvent: When a Pokemon faints in battle
-     * - PokemonHealedEvent: When a Pokemon is healed
-     * - PokemonLevelUpEvent: When a Pokemon levels up
-     * - PokemonSentOutEvent: When a Pokemon is sent out for battle
-     * - PokemonRecalledEvent: When a Pokemon is recalled
-     * - BattleStartedEvent: When a battle begins
-     * - BattleEndedEvent: When a battle ends
-     * - PokemonTradeEvent: When Pokemon are traded
-     * 
-     * Each event provides relevant data about the Pokemon, player, and context
-     */
+    private static void handlePokemonCapture(Object event) {
+        try {
+            // Use reflection to extract data from the event
+            Class<?> eventClass = event.getClass();
+            
+            // Get player and pokemon from event
+            Object player = eventClass.getMethod("getPlayer").invoke(event);
+            Object pokemon = eventClass.getMethod("getPokemon").invoke(event);
+            
+            if (player == null || pokemon == null) {
+                return;
+            }
+            
+            ServerPlayer serverPlayer = (ServerPlayer) player;
+            
+            // Only process if we should run server logic
+            if (!DevEnvironment.shouldRunServerLogic(serverPlayer.level())) {
+                return;
+            }
+            
+            // Extract Pokemon data using reflection
+            Class<?> pokemonClass = pokemon.getClass();
+            Object species = pokemonClass.getMethod("getSpecies").invoke(pokemon);
+            
+            int nationalDexNumber = (Integer) species.getClass().getMethod("getNationalPokedexNumber").invoke(species);
+            String pokemonName = (String) species.getClass().getMethod("getName").invoke(species);
+            boolean isShiny = (Boolean) pokemonClass.getMethod("getShiny").invoke(pokemon);
+            int level = (Integer) pokemonClass.getMethod("getLevel").invoke(pokemon);
+            
+            // Record capture in server data manager
+            ServerDataManager.getInstance().recordCapture(
+                serverPlayer.getUUID(),
+                nationalDexNumber
+            );
+            
+            PokeFactoryLegends.LOGGER.info("Player {} caught #{} {} (Level {}){}",
+                serverPlayer.getName().getString(), 
+                nationalDexNumber, 
+                pokemonName,
+                level,
+                isShiny ? " [SHINY]" : ""
+            );
+            
+        } catch (Exception e) {
+            PokeFactoryLegends.LOGGER.error("Error handling Pokemon capture event", e);
+        }
+    }
 }
