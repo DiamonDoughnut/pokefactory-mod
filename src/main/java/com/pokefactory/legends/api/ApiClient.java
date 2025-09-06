@@ -39,6 +39,7 @@ public class ApiClient {
                         PokeFactoryLegends.LOGGER.info("Server authenticated successfully");
                         return true;
                     }
+                    PokeFactoryLegends.LOGGER.error("Authentication failed - no token in response: {}", response);
                     return false;
                 });
     }
@@ -48,14 +49,14 @@ public class ApiClient {
         playerData.addProperty("player_uuid", playerUuid.toString());
         playerData.addProperty("player_name", playerName);
         
-        return sendPostRequest("/players", playerData);
+        return sendPostRequest("/server/player/create", playerData);
     }
 
     public CompletableFuture<JsonObject> getPlayer(UUID playerUuid) {
         JsonObject requestData = new JsonObject();
         requestData.addProperty("player_uuid", playerUuid.toString());
         
-        return sendPostRequest("/players/get", requestData);
+        return sendPostRequest("/server/player/profile", requestData);
     }
 
     public CompletableFuture<JsonObject> updatePlayerStats(UUID playerUuid, String statName, int value) {
@@ -64,14 +65,14 @@ public class ApiClient {
         statsData.addProperty("stat_name", statName);
         statsData.addProperty("value", value);
         
-        return sendPostRequest("/players/stats", statsData);
+        return sendPostRequest("/server/player/stats", statsData);
     }
 
     public CompletableFuture<JsonObject> updatePokedex(UUID playerUuid, int nationalDexNumber, boolean caught) {
         JsonObject pokedexData = new JsonObject();
         pokedexData.addProperty("player_uuid", playerUuid.toString());
-        pokedexData.addProperty("national_dex_number", nationalDexNumber);
-        pokedexData.addProperty("caught", caught);
+        pokedexData.addProperty("national_id", nationalDexNumber);
+        pokedexData.addProperty("action", caught ? "catch" : "release");
         
         return sendPostRequest("/pokedex/update", pokedexData);
     }
