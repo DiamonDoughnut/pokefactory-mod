@@ -4,6 +4,7 @@ plugins {
     id 'idea'
     id 'maven-publish'
     id 'net.neoforged.gradle.userdev' version '7.0.170'
+    id 'org.jetbrains.kotlin.jvm' version '2.1.21'
 }
 
 tasks.named('wrapper', Wrapper).configure {
@@ -20,6 +21,23 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    maven {
+        name = 'ImpactDev Nexus'
+        url = 'https://maven.impactdev.net/repository/development/'
+    }
+    maven {
+        name = 'ImpactDev Releases'
+        url = 'https://maven.impactdev.net/repository/releases/'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'Kotlin for Forge'
+        url = 'https://thedarkcolour.github.io/KotlinForForge/'
+        content { includeGroup "thedarkcolour" }
+    }
 }
 
 base {
@@ -97,6 +115,14 @@ dependencies {
     // And its provides the option to then use net.minecraft as the group, and one of; client, server or joined as the module name, plus the game version as version.
     // For all intends and purposes: You can treat this dependency as if it is a normal library you would use.
     implementation "net.neoforged:neoforge:${neo_version}"
+    
+    // KotlinForForge dependency
+    implementation 'thedarkcolour:kotlinforforge-neoforge:5.5.0'
+    
+    // Cobblemon dependency - optional for development
+    compileOnly "com.cobblemon:neoforge:${cobblemon_version}"
+    // Use localRuntime so it's available at runtime but not required for compilation
+    localRuntime "com.cobblemon:neoforge:${cobblemon_version}"
 
     // Example optional mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
