@@ -12,13 +12,17 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class SyncManager {
-    private static SyncManager instance;
+    private static volatile SyncManager instance;
     
     private SyncManager() {}
     
     public static SyncManager getInstance() {
         if (instance == null) {
-            instance = new SyncManager();
+            synchronized (SyncManager.class) {
+                if (instance == null) {
+                    instance = new SyncManager();
+                }
+            }
         }
         return instance;
     }
@@ -26,33 +30,34 @@ public class SyncManager {
     public CompletableFuture<String> syncFromDatabase() {
         PokeFactoryLegends.LOGGER.info("Starting sync FROM database (overwriting local data)");
         
-        return PokeFactoryLegends.getApiClient().getServerPokedexSnapshot()
-            .thenCompose(snapshot -> {
-                if (snapshot == null) {
-                    return CompletableFuture.completedFuture("Failed to retrieve database snapshot");
+        return PokeFactoryLegends.getApiClient().getPokedexLeaderboard()
+            .thenCompose(leaderboard -> {
+                if (leaderboard == null) {
+                    return CompletableFuture.completedFuture("Failed to retrieve database leaderboard");
                 }
                 
-                return applyDatabaseSnapshot(snapshot);
+                return applyDatabaseLeaderboard(leaderboard);
             });
     }
     
     public CompletableFuture<String> syncToDatabase() {
-        PokeFactoryLegends.LOGGER.info("Starting sync TO database (overwriting database with local data)");
+        PokeFactoryLegends.LOGGER.info("Starting sync TO database (batch updating individual players)");
         
-        return generateLocalSnapshot()
-            .thenCompose(localSnapshot -> {
-                if (localSnapshot == null) {
-                    return CompletableFuture.completedFuture("Failed to generate local snapshot");
+        return generateLocalPlayerUpdates()
+            .thenCompose(playerUpdates -> {
+                if (playerUpdates.isEmpty()) {
+                    return CompletableFuture.completedFuture("No local data to sync");
                 }
                 
-                return PokeFactoryLegends.getApiClient().overwriteServerPokedexData(localSnapshot)
+                ServerDataManager dataManager = ServerDataManager.getInstance();
+                return syncAllPlayersToDatabase(playerUpdates)
                     .thenApply(success -> {
                         if (success) {
-                            // Clear pending captures since we just overwrote the database
-                            ServerDataManager.getInstance().clearPendingCaptures();
-                            return "Successfully synced local data to database";
+                            // Clear pending captures since we just synced everything
+                            dataManager.clearPendingCaptures();
+                            return "Successfully synced " + playerUpdates.size() + " players to database";
                         } else {
-                            return "Failed to sync local data to database";
+                            return "Failed to sync some players to database";
                         }
                     });
             });
@@ -61,116 +66,87 @@ public class SyncManager {
     public CompletableFuture<String> syncPlayerFromDatabase(UUID playerUuid) {
         PokeFactoryLegends.LOGGER.info("Syncing player {} FROM database", playerUuid);
         
-        return PokeFactoryLegends.getApiClient().getAllPlayerPokedexData(playerUuid)
+        var apiClient = PokeFactoryLegends.getApiClient();
+        return apiClient.getPlayerPokedexSummary(playerUuid)
             .thenApply(playerData -> {
                 if (playerData == null) {
                     return "Failed to retrieve player data from database";
                 }
                 
-                return applyPlayerDatabaseData(playerUuid, playerData);
+                return applyPlayerDatabaseSummary(playerUuid, playerData);
             });
     }
     
-    private CompletableFuture<String> applyDatabaseSnapshot(JsonObject snapshot) {
+    private CompletableFuture<String> applyDatabaseLeaderboard(JsonObject leaderboard) {
         try {
-            // Clear all pending captures first
-            ServerDataManager.getInstance().clearPendingCaptures();
-            
-            if (!snapshot.has("players")) {
-                return CompletableFuture.completedFuture("Invalid snapshot format");
-            }
-            
-            JsonArray players = snapshot.getAsJsonArray("players");
-            int totalUpdated = 0;
-            
-            for (JsonElement playerElement : players) {
-                JsonObject playerData = playerElement.getAsJsonObject();
-                UUID playerUuid = UUID.fromString(playerData.get("player_uuid").getAsString());
-                
-                if (playerData.has("pokedex_data")) {
-                    JsonArray pokedexData = playerData.getAsJsonArray("pokedex_data");
-                    for (JsonElement entryElement : pokedexData) {
-                        JsonObject entry = entryElement.getAsJsonObject();
-                        int nationalDexNumber = entry.get("national_dex_number").getAsInt();
-                        
-                        // Apply to Cobblemon player data (this would need Cobblemon integration)
-                        applyCobblemonPokedexEntry(playerUuid, nationalDexNumber);
-                        totalUpdated++;
-                    }
-                }
-            }
+            // Note: Leaderboard doesn't contain detailed pokedex data, only summaries
+            // This is a limitation of the available API endpoints
+            PokeFactoryLegends.LOGGER.warn("Leaderboard sync only provides summary data, not detailed pokedex entries");
             
             return CompletableFuture.completedFuture(
-                "Successfully applied database snapshot: " + totalUpdated + " entries updated"
+                "Leaderboard retrieved but detailed sync not possible with current API endpoints"
             );
-            
+                        
         } catch (Exception e) {
-            PokeFactoryLegends.LOGGER.error("Failed to apply database snapshot", e);
-            return CompletableFuture.completedFuture("Error applying snapshot: " + e.getMessage());
+            PokeFactoryLegends.LOGGER.error("Failed to apply database leaderboard", e);
+            return CompletableFuture.completedFuture("Error applying leaderboard: " + e.getMessage());
         }
     }
     
-    private CompletableFuture<JsonObject> generateLocalSnapshot() {
+    private CompletableFuture<Map<UUID, JsonObject[]>> generateLocalPlayerUpdates() {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                JsonObject snapshot = new JsonObject();
-                JsonArray playersArray = new JsonArray();
+                Map<UUID, JsonObject[]> playerUpdates = new HashMap<>();
                 
                 MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
                 if (server == null) {
-                    return null;
+                    return playerUpdates;
                 }
                 
                 for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                    JsonObject playerData = new JsonObject();
-                    playerData.addProperty("player_uuid", player.getUUID().toString());
-                    playerData.addProperty("player_name", player.getName().getString());
-                    
-                    // Get Cobblemon pokedex data for this player
                     JsonArray pokedexData = getCobblemonPokedexData(player.getUUID());
-                    playerData.add("pokedex_data", pokedexData);
+                    List<JsonObject> updates = new ArrayList<>();
                     
-                    playersArray.add(playerData);
+                    for (JsonElement element : pokedexData) {
+                        JsonObject entry = element.getAsJsonObject();
+                        JsonObject update = new JsonObject();
+                        update.addProperty("national_id", entry.get("national_dex_number").getAsInt());
+                        update.addProperty("action", "catch");
+                        updates.add(update);
+                    }
+                    
+                    if (!updates.isEmpty()) {
+                        playerUpdates.put(player.getUUID(), updates.toArray(new JsonObject[0]));
+                    }
                 }
                 
-                snapshot.add("players", playersArray);
-                snapshot.addProperty("timestamp", System.currentTimeMillis());
-                snapshot.addProperty("server_id", "pokefactory_server_1");
-                
-                return snapshot;
+                return playerUpdates;
                 
             } catch (Exception e) {
-                PokeFactoryLegends.LOGGER.error("Failed to generate local snapshot", e);
-                return null;
+                PokeFactoryLegends.LOGGER.error("Failed to generate local player updates", e);
+                return new HashMap<>();
             }
         }).exceptionally(throwable -> {
-            PokeFactoryLegends.LOGGER.error("Async snapshot generation failed", throwable);
-            return null;
+            PokeFactoryLegends.LOGGER.error("Async player update generation failed", throwable);
+            return new HashMap<>();
         });
     }
     
-    private String applyPlayerDatabaseData(UUID playerUuid, JsonObject playerData) {
+    private String applyPlayerDatabaseSummary(UUID playerUuid, JsonObject playerData) {
         try {
-            if (!playerData.has("pokedex_data")) {
-                return "No pokedex data found for player";
+            // Summary only contains totals, not individual entries
+            if (playerData.has("total_caught")) {
+                int totalCaught = playerData.get("total_caught").getAsInt();
+                return "Player has " + totalCaught + " Pokemon caught (summary only, detailed sync not available)";
             }
             
-            JsonArray pokedexData = playerData.getAsJsonArray("pokedex_data");
-            int entriesApplied = 0;
-            
-            for (JsonElement entryElement : pokedexData) {
-                JsonObject entry = entryElement.getAsJsonObject();
-                int nationalDexNumber = entry.get("national_dex_number").getAsInt();
-                
-                applyCobblemonPokedexEntry(playerUuid, nationalDexNumber);
-                entriesApplied++;
-            }
-            
-            return "Applied " + entriesApplied + " pokedex entries for player";
+            return "Retrieved player summary but no detailed sync possible with current API endpoints";
             
         } catch (Exception e) {
             PokeFactoryLegends.LOGGER.error("Failed to apply player database data", e);
-            return "Error applying player data: " + e.getMessage();
+            String sanitizedMessage = e.getMessage() != null ? 
+                e.getMessage().replaceAll("[<>&\"']", "") : "Unknown error";
+            return "Error applying player data: " + sanitizedMessage;
         }
     }
     
@@ -254,5 +230,21 @@ public class SyncManager {
         }
         
         return pokedexData;
+    }
+    
+    private CompletableFuture<Boolean> syncAllPlayersToDatabase(Map<UUID, JsonObject[]> playerUpdates) {
+        List<CompletableFuture<Boolean>> futures = new ArrayList<>();
+        
+        for (Map.Entry<UUID, JsonObject[]> entry : playerUpdates.entrySet()) {
+            UUID playerUuid = entry.getKey();
+            JsonObject[] updates = entry.getValue();
+            
+            CompletableFuture<Boolean> future = PokeFactoryLegends.getApiClient()
+                .sendBatchUpdate(playerUuid, updates);
+            futures.add(future);
+        }
+        
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .thenApply(v -> futures.stream().allMatch(CompletableFuture::join));
     }
 }

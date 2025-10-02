@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class ServerDataManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServerDataManager.class);
@@ -85,33 +86,42 @@ public class ServerDataManager {
     }
     
     private void processBatch(List<CaptureData> batch) {
-        JsonArray captureArray = new JsonArray();
+        // Group captures by player and track which captures to remove
+        Map<UUID, List<JsonObject>> capturesByPlayer = new HashMap<>();
+        Map<UUID, List<String>> keysToRemoveByPlayer = new HashMap<>();
         
         for (CaptureData capture : batch) {
+            UUID playerUuid = capture.playerUuid();
+            capturesByPlayer.computeIfAbsent(playerUuid, k -> new ArrayList<>());
+            keysToRemoveByPlayer.computeIfAbsent(playerUuid, k -> new ArrayList<>());
+            
             JsonObject captureObj = new JsonObject();
-            captureObj.addProperty("player_uuid", capture.playerUuid().toString());
-            captureObj.addProperty("national_dex_number", capture.nationalDexNumber());
-            captureObj.addProperty("caught", true);
-            captureObj.addProperty("timestamp", capture.timestamp());
-            captureArray.add(captureObj);
+            captureObj.addProperty("national_id", capture.nationalDexNumber());
+            captureObj.addProperty("action", "catch");
+            capturesByPlayer.get(playerUuid).add(captureObj);
+            keysToRemoveByPlayer.get(playerUuid).add(capture.getUniqueKey());
         }
         
-        JsonObject batchData = new JsonObject();
-        batchData.add("captures", captureArray);
-        
-        PokeFactoryLegends.getApiClient().sendBatchUpdate(batchData)
-            .thenAccept(success -> {
-                if (success) {
-                    // Remove successfully synced captures
-                    for (CaptureData capture : batch) {
-                        pendingCaptures.remove(capture.getUniqueKey());
+        // Process each player's captures
+        for (Map.Entry<UUID, List<JsonObject>> entry : capturesByPlayer.entrySet()) {
+            UUID playerUuid = entry.getKey();
+            JsonObject[] updates = entry.getValue().toArray(new JsonObject[0]);
+            List<String> keysToRemove = keysToRemoveByPlayer.get(playerUuid);
+            
+            PokeFactoryLegends.getApiClient().sendBatchUpdate(playerUuid, updates)
+                .thenAccept(success -> {
+                    if (success) {
+                        // Remove successfully synced captures using pre-collected keys
+                        keysToRemove.forEach(pendingCaptures::remove);
+                        savePendingData();
+                        PokeFactoryLegends.LOGGER.info("Successfully synced {} captures for player {}", 
+                            updates.length, playerUuid);
+                    } else {
+                        PokeFactoryLegends.LOGGER.warn("Failed to sync {} captures for player {}, will retry", 
+                            updates.length, playerUuid);
                     }
-                    savePendingData();
-                    PokeFactoryLegends.LOGGER.info("Successfully synced batch of {} captures", batch.size());
-                } else {
-                    PokeFactoryLegends.LOGGER.warn("Failed to sync batch of {} captures, will retry", batch.size());
-                }
-            });
+                });
+        }
     }
     
     private void savePendingData() {

@@ -15,14 +15,18 @@ public class CobblemonEventHandler {
     @SubscribeEvent
     public static void onPlayerJoin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
+            PokeFactoryLegends.LOGGER.info("Player {} joined, checking Cobblemon events", player.getName().getString());
+            
             // Register Cobblemon events on first player join
             if (!cobblemonEventsRegistered) {
+                PokeFactoryLegends.LOGGER.info("Attempting to register Cobblemon events...");
                 registerCobblemonEvents();
                 cobblemonEventsRegistered = true;
             }
             
             // Only register players if we're running server logic
             if (DevEnvironment.shouldRunServerLogic(player.level())) {
+                PokeFactoryLegends.LOGGER.info("Registering player {} with backend", player.getName().getString());
                 PokeFactoryLegends.getApiClient().createPlayer(
                     player.getUUID(), 
                     player.getName().getString()
@@ -33,6 +37,8 @@ public class CobblemonEventHandler {
                         PokeFactoryLegends.LOGGER.warn("Failed to register player {} with backend", player.getName().getString());
                     }
                 });
+            } else {
+                PokeFactoryLegends.LOGGER.info("Skipping backend registration for player {} (dev environment check failed)", player.getName().getString());
             }
         }
     }
@@ -74,22 +80,27 @@ public class CobblemonEventHandler {
     }
     
     private static void handlePokemonCapture(Object event) {
+        PokeFactoryLegends.LOGGER.info("Pokemon capture event triggered!");
         try {
             // Use reflection to extract data from the event
             Class<?> eventClass = event.getClass();
+            PokeFactoryLegends.LOGGER.debug("Event class: {}", eventClass.getName());
             
             // Get player and pokemon from event
             Object player = eventClass.getMethod("getPlayer").invoke(event);
             Object pokemon = eventClass.getMethod("getPokemon").invoke(event);
             
             if (player == null || pokemon == null) {
+                PokeFactoryLegends.LOGGER.warn("Player or Pokemon is null in capture event");
                 return;
             }
             
             ServerPlayer serverPlayer = (ServerPlayer) player;
+            PokeFactoryLegends.LOGGER.info("Processing capture for player: {}", serverPlayer.getName().getString());
             
             // Only process if we should run server logic
             if (!DevEnvironment.shouldRunServerLogic(serverPlayer.level())) {
+                PokeFactoryLegends.LOGGER.info("Skipping capture processing (dev environment check failed)");
                 return;
             }
             

@@ -36,18 +36,16 @@ public class PokeFactoryLegends {
         LOGGER.info("PokéFactory Legends initializing...");
         apiClient = new ApiClient();
         LOGGER.info("API client initialized");
-        
-        // Register Cobblemon events if available
-        event.enqueueWork(() -> {
-            CobblemonEventHandler.registerCobblemonEvents();
-        });
+        LOGGER.info("Cobblemon events will be registered on first player join");
     }
     
     private void onServerStarted(final ServerStartedEvent event) {
         if (DevEnvironment.shouldInitializeDataManager()) {
             // Authenticate server with backend (same for dev and production)
+            PokeFactoryLegends.LOGGER.debug("Connection Timeout: {}", ModConfig.CONNECTION_TIMEOUT.get());
             apiClient.authenticateServer()
                 .thenAccept(success -> {
+                    
                     if (success) {
                         LOGGER.info("Server authenticated with backend - {}", DevEnvironment.getDevInfo());
                     } else {

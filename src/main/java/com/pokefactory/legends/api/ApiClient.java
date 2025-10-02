@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class ApiClient {
     private final HttpClient httpClient;
     private final Gson gson;
-    private String serverToken;
+    private volatile String serverToken;
     private volatile boolean shutdown = false;
 
     public ApiClient() {
@@ -29,11 +29,14 @@ public class ApiClient {
     }
 
     public CompletableFuture<Boolean> authenticateServer() {
+        PokeFactoryLegends.LOGGER.debug("authenticateServer method called");
         JsonObject authData = new JsonObject();
         authData.addProperty("server_id", "pokefactory_server_1");
+        authData.addProperty("server_key", ModConfig.SERVER_SECRET.get());
         
         return sendPostRequest("/server/auth", authData)
                 .thenApply(response -> {
+                    PokeFactoryLegends.LOGGER.debug("Received HTTP response: {}", response);    
                     if (response != null && response.has("token")) {
                         serverToken = response.get("token").getAsString();
                         PokeFactoryLegends.LOGGER.info("Server authenticated successfully");
@@ -44,10 +47,10 @@ public class ApiClient {
                 });
     }
 
-    public CompletableFuture<JsonObject> createPlayer(UUID playerUuid, String playerName) {
+    public CompletableFuture<JsonObject> createPlayer(UUID playerUuid, String username) {
         JsonObject playerData = new JsonObject();
         playerData.addProperty("player_uuid", playerUuid.toString());
-        playerData.addProperty("player_name", playerName);
+        playerData.addProperty("username", username);
         
         return sendPostRequest("/server/player/create", playerData);
     }
@@ -56,52 +59,98 @@ public class ApiClient {
         JsonObject requestData = new JsonObject();
         requestData.addProperty("player_uuid", playerUuid.toString());
         
-        return sendPostRequest("/server/player/profile", requestData);
+        return sendPostRequest("/server/player/get", requestData);
     }
 
-    public CompletableFuture<JsonObject> updatePlayerStats(UUID playerUuid, String statName, int value) {
+    public CompletableFuture<JsonObject> updatePlayerStats(UUID playerUuid, JsonObject stats) {
         JsonObject statsData = new JsonObject();
         statsData.addProperty("player_uuid", playerUuid.toString());
-        statsData.addProperty("stat_name", statName);
-        statsData.addProperty("value", value);
+        statsData.add("stats", stats);
         
-        return sendPostRequest("/server/player/stats", statsData);
+        return sendPostRequest("/server/player/stats/update", statsData);
     }
 
     public CompletableFuture<JsonObject> updatePokedex(UUID playerUuid, int nationalDexNumber, boolean caught) {
         JsonObject pokedexData = new JsonObject();
         pokedexData.addProperty("player_uuid", playerUuid.toString());
         pokedexData.addProperty("national_id", nationalDexNumber);
-        pokedexData.addProperty("action", caught ? "catch" : "release");
+        pokedexData.addProperty("action", caught ? "catch" : "see");
         
-        return sendPostRequest("/pokedex/update", pokedexData);
+        return sendPostRequest("/server/pokedex/update", pokedexData);
     }
 
-    public CompletableFuture<Boolean> sendBatchUpdate(JsonObject batchData) {
-        return sendPostRequest("/pokedex/batch", batchData)
-                .thenApply(response -> response != null);
+    // Batch update by iterating individual updates since no batch endpoint exists
+    public CompletableFuture<Boolean> sendBatchUpdate(UUID playerUuid, JsonObject[] pokedexUpdates) {
+        CompletableFuture<Boolean> result = CompletableFuture.completedFuture(true);
+        
+        for (JsonObject update : pokedexUpdates) {
+            int nationalId = update.get("national_id").getAsInt();
+            String action = update.get("action").getAsString();
+            boolean caught = "catch".equals(action);
+            
+            result = result.thenCompose(success -> {
+                if (!success) return CompletableFuture.completedFuture(false);
+                return updatePokedex(playerUuid, nationalId, caught)
+                        .thenApply(response -> response != null);
+            });
+        }
+        
+        return result;
     }
 
-    public CompletableFuture<JsonObject> getAllPlayerPokedexData(UUID playerUuid) {
+    // Get player's Pokedex summary using available endpoint
+    public CompletableFuture<JsonObject> getPlayerPokedexSummary(UUID playerUuid) {
         JsonObject requestData = new JsonObject();
         requestData.addProperty("player_uuid", playerUuid.toString());
         
-        return sendPostRequest("/pokedex/get-all", requestData);
+        return sendPostRequest("/server/pokedex/summary", requestData);
     }
 
-    public CompletableFuture<JsonObject> getServerPokedexSnapshot() {
+    // Get leaderboard data as closest equivalent to server snapshot
+    public CompletableFuture<JsonObject> getPokedexLeaderboard() {
+        return sendPostRequest("/server/pokedex/leaderboard", new JsonObject());
+    }
+
+    // Get player's regional Pokedex data
+    public CompletableFuture<JsonObject> getPlayerRegionalPokedex(UUID playerUuid, String region) {
         JsonObject requestData = new JsonObject();
-        requestData.addProperty("snapshot_type", "full");
+        requestData.addProperty("player_uuid", playerUuid.toString());
+        requestData.addProperty("region", region);
         
-        return sendPostRequest("/pokedex/snapshot", requestData);
+        return sendPostRequest("/server/pokedex/region", requestData);
     }
-
-    public CompletableFuture<Boolean> overwriteServerPokedexData(JsonObject snapshotData) {
-        return sendPostRequest("/pokedex/overwrite", snapshotData)
-                .thenApply(response -> response != null);
+    
+    // Get player stats using server endpoint
+    public CompletableFuture<JsonObject> getPlayerStats(UUID playerUuid) {
+        JsonObject requestData = new JsonObject();
+        requestData.addProperty("player_uuid", playerUuid.toString());
+        
+        return sendPostRequest("/server/player/stats/get", requestData);
+    }
+    
+    // Set player data using server endpoint
+    public CompletableFuture<JsonObject> setPlayerData(UUID playerUuid, String key, String value) {
+        JsonObject requestData = new JsonObject();
+        requestData.addProperty("player_uuid", playerUuid.toString());
+        requestData.addProperty("key", key);
+        requestData.addProperty("value", value);
+        
+        return sendPostRequest("/server/player/data/set", requestData);
+    }
+    
+    // Get player data using server endpoint
+    public CompletableFuture<JsonObject> getPlayerData(UUID playerUuid, String key) {
+        JsonObject requestData = new JsonObject();
+        requestData.addProperty("player_uuid", playerUuid.toString());
+        requestData.addProperty("key", key);
+        
+        return sendPostRequest("/server/player/data/get", requestData);
     }
 
     private CompletableFuture<JsonObject> sendPostRequest(String endpoint, JsonObject data) {
+        PokeFactoryLegends.LOGGER.debug("Calling sendPostRequest with endpoint: {}", endpoint);
+        PokeFactoryLegends.LOGGER.debug("Preparing to send POST request to: {}", endpoint);
+        PokeFactoryLegends.LOGGER.debug("Request body: {}", gson.toJson(data));
         if (shutdown) {
             return CompletableFuture.completedFuture(null);
         }
@@ -114,12 +163,12 @@ public class ApiClient {
                 .timeout(Duration.ofSeconds(ModConfig.CONNECTION_TIMEOUT.get()))
                 .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(data)));
                 
-        if (serverToken != null && !serverToken.isEmpty()) {
-            requestBuilder.header("Authorization", "Bearer " + serverToken);
+        String token = serverToken; // Local copy to avoid race conditions
+        if (token != null && !token.isEmpty()) {
+            requestBuilder.header("Authorization", "Bearer " + token);
         }
         
         HttpRequest request = requestBuilder.build();
-        
         return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                 .orTimeout(ModConfig.CONNECTION_TIMEOUT.get() + 5, TimeUnit.SECONDS)
                 .thenApply(response -> {
@@ -136,9 +185,6 @@ public class ApiClient {
                     }
                 })
                 .exceptionally(throwable -> {
-                    if (!shutdown) {
-                        PokeFactoryLegends.LOGGER.error("API request failed", throwable);
-                    }
                     return null;
                 });
     }

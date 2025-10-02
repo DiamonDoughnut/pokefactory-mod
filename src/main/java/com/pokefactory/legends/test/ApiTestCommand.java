@@ -160,7 +160,11 @@ public class ApiTestCommand {
 
         source.sendSuccess(() -> Component.literal("Testing stats update: " + statName + " = " + value), false);
         
-        PokeFactoryLegends.getApiClient().updatePlayerStats(player.getUUID(), statName, value)
+        // Create a stats object with the provided stat
+        com.google.gson.JsonObject stats = new com.google.gson.JsonObject();
+        stats.addProperty(statName, value);
+        
+        PokeFactoryLegends.getApiClient().updatePlayerStats(player.getUUID(), stats)
             .thenAccept(response -> {
                 if (response != null) {
                     source.sendSuccess(() -> Component.literal("✓ Stats updated: " + response), false);

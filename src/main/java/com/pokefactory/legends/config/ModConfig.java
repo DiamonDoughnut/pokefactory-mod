@@ -12,6 +12,10 @@ public class ModConfig {
     public static final ModConfigSpec.ConfigValue<String> SERVER_TOKEN = BUILDER
             .comment("JWT token for server authentication")
             .define("server_token", "");
+
+    public static final ModConfigSpec.ConfigValue<String> SERVER_SECRET = BUILDER
+            .comment("Secret Key for JWT creation - must match backend secret")
+            .define("secret_key", "");
             
     public static final ModConfigSpec.IntValue CONNECTION_TIMEOUT = BUILDER
             .comment("HTTP connection timeout in seconds")
