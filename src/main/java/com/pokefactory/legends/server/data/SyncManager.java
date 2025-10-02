@@ -124,11 +124,11 @@ public class SyncManager {
                 
             } catch (Exception e) {
                 PokeFactoryLegends.LOGGER.error("Failed to generate local player updates", e);
-                return new HashMap<>();
+                return new HashMap<UUID, JsonObject[]>();
             }
         }).exceptionally(throwable -> {
             PokeFactoryLegends.LOGGER.error("Async player update generation failed", throwable);
-            return new HashMap<>();
+            return new HashMap<UUID, JsonObject[]>();
         });
     }
     
