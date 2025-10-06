@@ -3,6 +3,7 @@ package com.pokefactory.legends.commands;
 import com.mojang.brigadier.CommandDispatcher;
 import com.pokefactory.legends.PokeFactoryLegends;
 import com.pokefactory.legends.server.data.SyncManager;
+import com.pokefactory.legends.util.CobblemonDataValidator;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -39,6 +40,13 @@ public class SyncCommand {
                             syncPlayerFromDatabase(context.getSource(), target);
                             return 1;
                         }))))
+            .then(Commands.literal("validate")
+                .then(Commands.argument("target", EntityArgument.player())
+                    .executes(context -> {
+                        ServerPlayer target = EntityArgument.getPlayer(context, "target");
+                        validatePlayer(context.getSource(), target);
+                        return 1;
+                    })))
             .then(Commands.literal("status")
                 .executes(context -> {
                     showSyncStatus(context.getSource());
@@ -89,11 +97,39 @@ public class SyncCommand {
             });
     }
 
+    private static void validatePlayer(CommandSourceStack source, ServerPlayer target) {
+        source.sendSuccess(() -> Component.literal("§6[VALIDATE] Checking " + target.getName().getString() + "'s Pokédex data..."), true);
+        
+        CobblemonDataValidator.validatePlayer(target)
+            .thenAccept(result -> {
+                if (result.hasError()) {
+                    source.sendFailure(Component.literal("§c[VALIDATE] Error: " + result.getErrorMessage()));
+                    return;
+                }
+                
+                if (result.isInSync()) {
+                    source.sendSuccess(() -> Component.literal("§a[VALIDATE] " + target.getName().getString() + " is in sync!"), true);
+                    source.sendSuccess(() -> Component.literal("§7Cobblemon: " + result.cobblemonCount + " | Backend: " + result.backendCount), false);
+                } else {
+                    source.sendSuccess(() -> Component.literal("§c[VALIDATE] " + target.getName().getString() + " has discrepancies:"), true);
+                    source.sendSuccess(() -> Component.literal("§7Cobblemon: " + result.cobblemonCount + " | Backend: " + result.backendCount), false);
+                    
+                    if (!result.missingInBackend.isEmpty()) {
+                        source.sendSuccess(() -> Component.literal("§e Missing in backend: " + result.missingInBackend.size() + " Pokémon"), false);
+                    }
+                    if (!result.extraInBackend.isEmpty()) {
+                        source.sendSuccess(() -> Component.literal("§e Extra in backend: " + result.extraInBackend.size() + " Pokémon"), false);
+                    }
+                }
+            });
+    }
+
     private static void showSyncStatus(CommandSourceStack source) {
         source.sendSuccess(() -> Component.literal("§b=== PokéFactory Sync Status ==="), false);
         source.sendSuccess(() -> Component.literal("§e/pfsync from-db §7- Sync FROM database (overwrites local)"), false);
         source.sendSuccess(() -> Component.literal("§e/pfsync to-db §7- Sync TO database (overwrites database)"), false);
         source.sendSuccess(() -> Component.literal("§e/pfsync player <name> from-db §7- Sync specific player"), false);
+        source.sendSuccess(() -> Component.literal("§e/pfsync validate <name> §7- Check player's data consistency"), false);
         source.sendSuccess(() -> Component.literal("§c§lWARNING: §cSync operations are destructive!"), false);
     }
 }

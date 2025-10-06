@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.pokefactory.legends.PokeFactoryLegends;
 import com.pokefactory.legends.server.data.ServerDataManager;
 import com.pokefactory.legends.util.DevEnvironment;
+import com.pokefactory.legends.util.CobblemonDataValidator;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -74,6 +75,16 @@ public class ApiTestCommand {
                 .then(Commands.literal("cobblemon")
                     .executes(context -> {
                         testCobblemonIntegration(context.getSource());
+                        return 1;
+                    })))
+            .then(Commands.literal("validate")
+                .executes(context -> {
+                    testValidation(context.getSource());
+                    return 1;
+                })
+                .then(Commands.literal("all")
+                    .executes(context -> {
+                        testValidationAll(context.getSource());
                         return 1;
                     })))
             .then(Commands.literal("dev")
@@ -205,6 +216,64 @@ public class ApiTestCommand {
         source.sendSuccess(() -> Component.literal("Development Environment Info:"), false);
         source.sendSuccess(() -> Component.literal(DevEnvironment.getDevInfo()), false);
         source.sendSuccess(() -> Component.literal("Use config to enable dev_mode and simulate_multiplayer"), false);
+    }
+    
+    private static void testValidation(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("This command must be run by a player"));
+            return;
+        }
+        
+        source.sendSuccess(() -> Component.literal("Testing data validation for " + player.getName().getString() + "..."), false);
+        
+        CobblemonDataValidator.validatePlayer(player)
+            .thenAccept(result -> {
+                if (result.hasError()) {
+                    source.sendFailure(Component.literal("✗ Validation error: " + result.getErrorMessage()));
+                } else {
+                    source.sendSuccess(() -> Component.literal("✓ Validation complete:"), false);
+                    source.sendSuccess(() -> Component.literal("  Cobblemon: " + result.cobblemonCount + " caught"), false);
+                    source.sendSuccess(() -> Component.literal("  Backend: " + result.backendCount + " caught"), false);
+                    
+                    if (result.isInSync()) {
+                        source.sendSuccess(() -> Component.literal("  Status: ✓ In sync"), false);
+                    } else {
+                        source.sendSuccess(() -> Component.literal("  Status: ✗ Out of sync"), false);
+                        if (!result.missingInBackend.isEmpty()) {
+                            source.sendSuccess(() -> Component.literal("  Missing in backend: " + result.missingInBackend.size()), false);
+                        }
+                        if (!result.extraInBackend.isEmpty()) {
+                            source.sendSuccess(() -> Component.literal("  Extra in backend: " + result.extraInBackend.size()), false);
+                        }
+                    }
+                }
+            });
+    }
+    
+    private static void testValidationAll(CommandSourceStack source) {
+        var server = source.getServer();
+        var players = server.getPlayerList().getPlayers();
+        
+        if (players.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("No players online to validate"), false);
+            return;
+        }
+        
+        source.sendSuccess(() -> Component.literal("Validating " + players.size() + " online players..."), false);
+        
+        for (ServerPlayer player : players) {
+            CobblemonDataValidator.validatePlayer(player)
+                .thenAccept(result -> {
+                    String playerName = player.getName().getString();
+                    if (result.hasError()) {
+                        source.sendFailure(Component.literal("✗ " + playerName + ": " + result.getErrorMessage()));
+                    } else if (result.isInSync()) {
+                        source.sendSuccess(() -> Component.literal("✓ " + playerName + ": In sync (" + result.cobblemonCount + ")"), false);
+                    } else {
+                        source.sendSuccess(() -> Component.literal("✗ " + playerName + ": Out of sync (C:" + result.cobblemonCount + " B:" + result.backendCount + ")"), false);
+                    }
+                });
+        }
     }
     
     private static void testCobblemonIntegration(CommandSourceStack source) {

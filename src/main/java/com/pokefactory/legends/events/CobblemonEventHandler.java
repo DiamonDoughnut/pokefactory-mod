@@ -47,30 +47,53 @@ public class CobblemonEventHandler {
         try {
             // Use reflection to safely register Cobblemon events
             Class<?> eventsClass = Class.forName("com.cobblemon.mod.common.api.events.CobblemonEvents");
-            Class<?> captureEventClass = Class.forName("com.cobblemon.mod.common.api.events.pokemon.PokemonCapturedEvent");
             
             // Get the POKEMON_CAPTURED event field
             Object pokemonCapturedEvent = eventsClass.getField("POKEMON_CAPTURED").get(null);
             
-            // Create event handler using reflection
-            java.lang.reflect.Method subscribeMethod = pokemonCapturedEvent.getClass().getMethod("subscribe", 
-                Class.forName("com.cobblemon.mod.common.api.Priority"), 
-                java.util.function.Function.class);
+            // Try different method signatures for different Cobblemon versions
+            java.lang.reflect.Method subscribeMethod = null;
+            Object[] args = null;
             
-            // Get Priority.NORMAL
-            Class<?> priorityClass = Class.forName("com.cobblemon.mod.common.api.Priority");
-            Object normalPriority = priorityClass.getField("NORMAL").get(null);
+            try {
+                // Try the newer signature first (Cobblemon 1.6+)
+                subscribeMethod = pokemonCapturedEvent.getClass().getMethod("subscribe", java.util.function.Function.class);
+                args = new Object[]{ (java.util.function.Function<Object, Object>) event -> {
+                    handlePokemonCapture(event);
+                    // Return Unit.INSTANCE for Kotlin compatibility
+                    try {
+                        return Class.forName("kotlin.Unit").getField("INSTANCE").get(null);
+                    } catch (Exception e) {
+                        return null;
+                    }
+                }};
+            } catch (NoSuchMethodException e1) {
+                try {
+                    // Try the older signature with Priority (Cobblemon 1.5 and earlier)
+                    subscribeMethod = pokemonCapturedEvent.getClass().getMethod("subscribe", 
+                        Class.forName("com.cobblemon.mod.common.api.Priority"), 
+                        java.util.function.Function.class);
+                    
+                    // Get Priority.NORMAL
+                    Class<?> priorityClass = Class.forName("com.cobblemon.mod.common.api.Priority");
+                    Object normalPriority = priorityClass.getField("NORMAL").get(null);
+                    
+                    args = new Object[]{ normalPriority, (java.util.function.Function<Object, Object>) event -> {
+                        handlePokemonCapture(event);
+                        // Return Unit.INSTANCE for Kotlin compatibility
+                        try {
+                            return Class.forName("kotlin.Unit").getField("INSTANCE").get(null);
+                        } catch (Exception e) {
+                            return null;
+                        }
+                    }};
+                } catch (NoSuchMethodException e2) {
+                    throw new RuntimeException("Could not find compatible subscribe method", e2);
+                }
+            }
             
             // Subscribe to the event
-            subscribeMethod.invoke(pokemonCapturedEvent, normalPriority, (java.util.function.Function<Object, Object>) event -> {
-                handlePokemonCapture(event);
-                // Return Unit.INSTANCE for Kotlin compatibility
-                try {
-                    return Class.forName("kotlin.Unit").getField("INSTANCE").get(null);
-                } catch (Exception e) {
-                    return null;
-                }
-            });
+            subscribeMethod.invoke(pokemonCapturedEvent, args);
             
             PokeFactoryLegends.LOGGER.info("Successfully registered Cobblemon events");
             
